@@ -1,9 +1,9 @@
 import random
 import os
 import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from flask import Flask
 import threading
 
 # ==== TELEGRAM BOT ====
@@ -69,24 +69,25 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("История сброшена!")
 
 
-# ==== KEEP ALIVE (веб-сервер) ====
-app_flask = Flask(__name__)
+# ==== KEEP ALIVE (простой HTTP-сервер) ====
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
 
 
-@app_flask.route("/")
-def home():
-    return "Бот работает!"
-
-
-def run_flask():
+def run_server():
     port = int(os.environ.get("PORT", 10000))
-    app_flask.run(host="0.0.0.0", port=port)
+    server = HTTPServer(("0.0.0.0", port), SimpleHandler)
+    print(f"Keep-alive сервер на порту {port}")
+    server.serve_forever()
 
 
 # ==== ЗАПУСК ====
 if __name__ == "__main__":
-    # Запускаем Flask в отдельном потоке
-    threading.Thread(target=run_flask, daemon=True).start()
+    # Запускаем HTTP-сервер в отдельном потоке
+    threading.Thread(target=run_server, daemon=True).start()
 
     # Запускаем Telegram бота
     app = Application.builder().token(TOKEN).build()
@@ -95,5 +96,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("5", five))
     app.add_handler(CommandHandler("reset", reset))
 
-    print("Бот запущен с Keep-Alive!")
+    print("Бот запущен!")
     app.run_polling()
