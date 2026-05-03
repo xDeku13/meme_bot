@@ -1,22 +1,19 @@
 import random
+import os
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from flask import Flask
+import threading
 
-TOKEN = "8404106428:AAE3hHtFiBl_EYMrxt9cPdyVJsawx_LU-Vk"
+# ==== TELEGRAM BOT ====
+TOKEN = os.environ.get("TOKEN", "запасной_токен")
 REDDIT_URL = "https://www.reddit.com/r/memes/top.json?t=day&limit=25"
-
-# Список уже отправленных URL (чтобы не повторяться)
 sent_memes = []
 
 
 def get_fresh_memes():
-    """
-    Забирает с Reddit мемы, которые ещё не отправляли.
-    Если все 25 уже были — сбрасывает историю и начинает заново.
-    """
     global sent_memes
-
     headers = {"User-Agent": "MemeBot/1.0"}
     response = requests.get(REDDIT_URL, headers=headers)
     data = response.json()
@@ -27,14 +24,10 @@ def get_fresh_memes():
         if url.endswith((".jpg", ".jpeg", ".png", ".gif")):
             all_memes.append(url)
 
-    # Отсеиваем уже отправленные
     fresh = [m for m in all_memes if m not in sent_memes]
-
-    # Если свежих не осталось — сбрасываем историю
     if not fresh:
         sent_memes = []
         fresh = all_memes
-
     return fresh
 
 
@@ -43,17 +36,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Привет! Я мем-бот!\n"
         "/meme — случайный мем\n"
         "/5 — пачка из 5 мемов\n"
-        "/reset — сбросить историю мемов"
+        "/reset — сбросить историю"
     )
 
 
 async def meme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global sent_memes
-
     fresh = get_fresh_memes()
     if fresh:
         url = random.choice(fresh)
-        sent_memes.append(url)  # запоминаем что отправили
+        sent_memes.append(url)
         await update.message.reply_photo(photo=url, caption="Держи мем!")
     else:
         await update.message.reply_text("Не могу найти мемы. Попробуй позже.")
@@ -61,12 +53,10 @@ async def meme(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def five(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global sent_memes
-
     fresh = get_fresh_memes()
     if fresh:
-        # Берём до 5 штук
         chosen = random.sample(fresh, min(5, len(fresh)))
-        sent_memes.extend(chosen)  # добавляем все выбранные в историю
+        sent_memes.extend(chosen)
         for url in chosen:
             await update.message.reply_photo(photo=url)
     else:
@@ -74,17 +64,35 @@ async def five(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сбрасывает историю отправленных мемов"""
     global sent_memes
     sent_memes = []
-    await update.message.reply_text("История сброшена! Мемы могут повторяться.")
+    await update.message.reply_text("История сброшена!")
 
 
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("meme", meme))
-app.add_handler(CommandHandler("5", five))
-app.add_handler(CommandHandler("reset", reset))
+# ==== KEEP ALIVE (веб-сервер) ====
+app_flask = Flask(__name__)
 
-print("Бот запущен с защитой от повторов!")
-app.run_polling()
+
+@app_flask.route("/")
+def home():
+    return "Бот работает!"
+
+
+def run_flask():
+    app_flask.run(host="0.0.0.0", port=10000)
+
+
+# ==== ЗАПУСК ====
+if __name__ == "__main__":
+    # Запускаем Flask в отдельном потоке
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # Запускаем Telegram бота
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("meme", meme))
+    app.add_handler(CommandHandler("5", five))
+    app.add_handler(CommandHandler("reset", reset))
+
+    print("Бот запущен с Keep-Alive!")
+    app.run_polling()
